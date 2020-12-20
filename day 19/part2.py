@@ -26,7 +26,7 @@ def resolve_rules(rules):
 
             new_body = []
             for token in body.split():
-                if token in ["a", "b", "|", "(", ")", "."]:
+                if token in ["a", "b", "|", "(", ")"]:
                     new_body.append(token)
                     continue
                 elif token in resolved_rules:
@@ -115,7 +115,7 @@ def print_ast(node, indent=0):
 
 
 def print_ast_as_expression(node, root=True):
-    if node.value[0] in ["a", "b", "."]:
+    if node.value[0] in ["a", "b"]:
         print(node.value, end="")
 
     elif node.value in ["+", "|"]:
@@ -138,25 +138,25 @@ def match_ast_inner(text, node):
     if node.value == "+":
         length = 0
         for child in node.children:
-            match = match_ast_inner(text[length:], child)
-            if match is None:
+            child_length = match_ast_inner(text[length:], child)
+            if child_length is None:
                 return None
             else:
-                length += match
+                length += child_length
 
         return length
 
     elif node.value == "|":
         for child in node.children:
-            match = match_ast_inner(text, child)
-            if match is not None:
-                return match
+            length = match_ast_inner(text, child)
+            if length is not None:
+                return length
 
         return None
 
     else:
         if text.startswith(node.value):
-            return 1
+            return len(node.value)
         else:
             return None
 
@@ -165,37 +165,89 @@ def match_ast(text, node):
     return match_ast_inner(text, node) == len(text)
 
 
-def iter_rule_8(depth):
-    # depth = how many levels of recursion should be allowed
-    rule_8 = "42 | 42 8"
-    for _ in range(depth):
-        rule_8 = rule_8.replace("8", f"( {rule_8} )")
-        yield rule_8.replace("8", "42")
+# def generate_rule_8(depth):
+#     # depth = how many levels of recursion should be allowed
+#     rule_8 = "42 | 42 8"
+#     for _ in range(depth):
+#         rule_8 = rule_8.replace("8", f"( {rule_8} )")
+#     return rule_8.replace("8", "42")
 
 
-def iter_rule_11(depth):
-    # depth = how many levels of recursion should be allowed
-    rule_11 = "42 31 | 42 11 31"
-    for _ in range(depth):
-        rule_11 = rule_11.replace("11", f"( {rule_11} )")
-        yield rule_11.replace("11", "( 42 31 )")
+# def generate_rule_11(depth):
+#     # depth = how many levels of recursion should be allowed
+#     rule_11 = "42 31 | 42 11 31"
+#     for _ in range(depth):
+#         rule_11 = rule_11.replace("11", f"( {rule_11} )")
+#     return rule_11.replace("11", "( 42 31 )")
 
 
-#
-#
-#
-# NOTES FOR TOMORROW:
-#
-# IF THE PATTERN MATCHES ANYTHING THAT HAPPENED EARLIER IN THE STRING, IT WILL WORK BECAUSE OF THE (A | A blahblahblah) nature of it
-#
-# If we know how long 42 is we can tell the length of A and split the string to it (and we do because that's the length of messages that used to be matched)
-#
-# This string is always rule 8 N times + rule 11 n times
-#
-# Rule 11 is always 42 31 long or 2x that because it's either 42 31 or a 42 42 31 31
-#
-#
-#
+# the length that matches this ast. Assumes same length for all branches.
+def pattern_length(ast):
+    if ast.value == "+":
+        length = 0
+        for child in ast.children:
+            length += pattern_length(child)
+        return length
+    elif ast.value == "|":
+        return pattern_length(ast.children[0])
+    else:
+        return 1
+
+
+def match_8_11(text, resolved_rules):
+    # rule 8: 42 | 42 8
+    # rule 11: 42 31 | 42 11 31
+
+    # rules 8 and 11 simplify to 42 n times followd by 42 k times followed by 31 k times
+    asts = dict()
+    for name in ["42", "31"]:
+        asts[name] = parse_rule(resolved_rules[name])
+
+    # input(message)
+
+    length_42 = pattern_length(asts["42"])
+    length_31 = pattern_length(asts["31"])
+
+    # let's assume the lenghts are the same to partition the text more easily
+    assert length_42 == length_31
+    chunk_length = length_42
+
+    chunks = len(text) / chunk_length
+    assert chunks.is_integer()
+    chunks = int(chunks)
+
+    # create possible ways (distributions) the rules could match this text
+    distributions = []
+    k = 1
+    while k * 2 < chunks:
+        distribution = list(
+            itertools.chain(
+                itertools.repeat("42", chunks - k),
+                itertools.repeat("31", k),
+            )
+        )
+        distributions.append(distribution)
+        k += 1
+
+    # print(text)
+    # pprint(distributions)
+    # input()
+
+    for distribution in distributions:
+        offset = 0
+        for rule_name in distribution:
+            chunk = message[offset : offset + chunk_length]
+            if match_ast(chunk, asts[rule_name]):
+                # print(f"matched {rule_name} with {chunk}")
+                offset += chunk_length
+            else:
+                break
+
+        if offset == len(text):
+            return True
+
+    return False
+
 
 # load input file
 
@@ -214,40 +266,21 @@ for rule in rules_text.splitlines():
     else:
         rules[name] = body
 
-# iterate over every possible variant of rule 8 and 11
+# resolved rules
+
+resolved_rules = resolve_rules(rules)
+
+# load messages
+
+messages = messages_text.splitlines()
+
+# match
 
 matches = set()
-depth = 10
 
-for rule_8, rule_11 in itertools.product(iter_rule_8(depth), iter_rule_11(depth)):
-    # print(rule_8, "\t\t\t", rule_11)
-
-    rules["8"] = rule_8
-    rules["11"] = rule_11
-
-    # resolve rules
-
-    resolved_rules = resolve_rules(rules)
-    # pprint(rules)
-
-    # load messages
-
-    messages = messages_text.splitlines()
-    # pprint(messages)
-
-    # build ast
-
-    ast = parse_rule(resolved_rules["0"])
-    # print_ast(ast)
-    # print_ast_as_expression(ast)
-
-    for message in messages:
-        match = match_ast(message, ast)
-        if match:
-            # print(message)
-            matches.add(message)
-
-    print(len(matches))
+for message in messages:
+    if match_8_11(message, resolved_rules):
+        matches.add(message)
 
 for message in matches:
     print(message)
